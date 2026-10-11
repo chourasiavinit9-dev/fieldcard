@@ -1,0 +1,58 @@
+[
+  {
+    "crop": "Garlic",
+    "action": "Plant cloves 2 inches deep, pointed end up, and mulch heavily.",
+    "season": "autumn",
+    "frost_rel_weeks": [-4, 3],
+    "reference": "first_autumn_frost"
+  },
+  {
+    "crop": "Winter Spinach",
+    "action": "Sow cold-hardy spinach seeds directly in fertile ground under a cloche.",
+    "season": "autumn",
+    "frost_rel_weeks": [-6, -1],
+    "reference": "first_autumn_frost"
+  },
+  {
+    "crop": "Kale & Collards",
+    "action": "Harvest outer tender leaves; light frost sweetens and tenderizes the greens.",
+    "season": "autumn",
+    "frost_rel_weeks": [-4, 8],
+    "reference": "first_autumn_frost"
+  },
+  {
+    "crop": "Spring Peas",
+    "action": "Direct sow sugar snap or shelling peas as soon as soil can be worked.",
+    "season": "spring",
+    "frost_rel_weeks": [-6, -2],
+    "reference": "last_spring_frost"
+  },
+  {
+    "crop": "Radishes & Early Greens",
+    "action": "Direct sow seeds half an inch deep; thin seedlings once third leaf shows.",
+    "season": "spring",
+    "frost_rel_weeks": [-4, 4],
+    "reference": "last_spring_frost"
+  },
+  {
+    "crop": "Carrots",
+    "action": "Sow fine seeds in deeply loosened stone-free soil and keep surface moist.",
+    "season": "spring",
+    "frost_rel_weeks": [-3, 6],
+    "reference": "last_spring_frost"
+  },
+  {
+    "crop": "Tomatoes & Peppers",
+    "action": "Harden off seedlings and transplant outdoors only when all frost danger has passed.",
+    "season": "spring",
+    "frost_rel_weeks": [1, 6],
+    "reference": "last_spring_frost"
+  },
+  {
+    "crop": "Bush Beans & Squash",
+    "action": "Direct sow warm-weather seeds once soil temperature reaches at least 15°C (60°F).",
+    "season": "summer",
+    "frost_rel_weeks": [2, 8],
+    "reference": "last_spring_frost"
+  }
+]
