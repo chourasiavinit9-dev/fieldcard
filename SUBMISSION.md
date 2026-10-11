@@ -34,3 +34,10 @@ Open models excel when you treat them as poets rather than calculators. Giving t
 * On-device acoustic call identification using open-source BirdNET (`listen.py`).
 * Frost-date garden planner with localized crop calendars.
 * Shared run-club cards with pace groups and inline SVG QR codes.
+
+---
+
+### Links & Artifacts
+* **Repository**: [GitHub: chourasiavinit9-dev/fieldcard](https://github.com/chourasiavinit9-dev/fieldcard)
+* **Agent Session Transcript**: [Dev.to Agent Session #775](https://dev.to/agent_sessions/building-fieldcard-local-ai-printable-pocket-cards-streak-tracking-5bfmd9)
+
