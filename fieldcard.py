@@ -305,6 +305,49 @@ def fetch_species(lat: float, lon: float, month: int, radius_km: float = 6.0, ti
     return species[:4]
 
 
+# ---------------------------------------------------------------- weather (Open-Meteo, free, no key)
+
+WMO_CODES = {
+    0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Fog", 48: "Rime fog", 51: "Light drizzle", 53: "Drizzle", 55: "Dense drizzle",
+    61: "Light rain", 63: "Rain", 65: "Heavy rain", 71: "Light snow", 73: "Snow",
+    75: "Heavy snow", 80: "Rain showers", 81: "Moderate showers", 82: "Violent showers",
+    95: "Thunderstorm", 96: "Thunderstorm with hail", 99: "Severe thunderstorm",
+}
+
+WEATHER_EMOJI = {
+    0: "☀️", 1: "🌤", 2: "⛅", 3: "☁️", 45: "🌫", 48: "🌫", 51: "🌦", 53: "🌧",
+    55: "🌧", 61: "🌦", 63: "🌧", 65: "🌧", 71: "🌨", 73: "❄️", 75: "❄️",
+    80: "🌦", 81: "🌧", 82: "⛈", 95: "⛈", 96: "⛈", 99: "⛈",
+}
+
+
+def fetch_weather(lat: float, lon: float, timeout: int = 3) -> Optional[Dict[str, Any]]:
+    """Fetch current weather from Open-Meteo (free, no API key). Returns None on failure."""
+    url = (
+        f"https://api.open-meteo.com/v1/forecast?"
+        f"latitude={lat:.4f}&longitude={lon:.4f}"
+        f"&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code"
+        f"&temperature_unit=celsius&wind_speed_unit=kmh"
+    )
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "fieldcard/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            data = json.load(r)
+            current = data.get("current", {})
+            code = current.get("weather_code", 0)
+            return {
+                "temp_c": current.get("temperature_2m"),
+                "humidity": current.get("relative_humidity_2m"),
+                "wind_kmh": current.get("wind_speed_10m"),
+                "code": code,
+                "desc": WMO_CODES.get(code, "Unknown"),
+                "emoji": WEATHER_EMOJI.get(code, "🌡"),
+            }
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------- garden mode logic
 
 
@@ -611,6 +654,11 @@ h2 { font: 700 7.5pt Helvetica, Arial, sans-serif; letter-spacing: .16em; text-t
 .cell i { position: absolute; right: 1.5mm; bottom: 1.5mm; width: 3.5mm; height: 3.5mm; border: 1.2px solid #1d2b22; }
 .foot { margin-top: 3mm; border-top: 1.2px solid #1d2b22; padding-top: 2mm; font-size: 9pt; display: flex; justify-content: space-between; gap: 3mm; }
 .tiny { font: 7pt Helvetica, Arial, sans-serif; color: #5b6b60; margin-top: 1.5mm; }
+.weather-bar { display: flex; gap: 3mm; background: #f0f4f8; border: 1px solid #c0ccd6; padding: 1.5mm 2.5mm; margin-bottom: 2.5mm;
+ font-size: 8pt; line-height: 1.25; align-items: center; }
+.weather-bar .wx-emoji { font-size: 14pt; flex: none; }
+.weather-bar .wx-detail { flex: 1; }
+.weather-bar b { color: #3b6a8f; text-transform: uppercase; font-size: 7pt; letter-spacing: .08em; }
 """
 
 
@@ -643,7 +691,7 @@ def map_svg(places: List[Dict[str, Any]], rk: float, accent: str) -> str:
 def render_card(facts: Dict[str, Any], places: List[Dict[str, Any]], copy: Dict[str, Any],
                 sun: Dict[str, Optional[dt.datetime]], start: dt.datetime, end: dt.datetime,
                 species: Optional[List[str]] = None, garden_info: Optional[List[Dict[str, str]]] = None,
-                web_ui: bool = False) -> str:
+                web_ui: bool = False, weather: Optional[Dict[str, Any]] = None) -> str:
     e, a = html.escape, ACCENT[facts["season"]]
     mins, act = facts["minutes"], facts["activity"]
     turn = start + dt.timedelta(minutes=mins / 2)
@@ -701,6 +749,18 @@ def render_card(facts: Dict[str, Any], places: List[Dict[str, Any]], copy: Dict[
     if species:
         species_html = f'<div class="species-bar"><b>Seen nearby this month:</b> {e(", ".join(species))}</div>'
 
+    weather_html = ""
+    if weather and weather.get("temp_c") is not None:
+        wx = weather
+        wind_note = f' · Wind {wx["wind_kmh"]:.0f} km/h' if wx.get('wind_kmh') else ''
+        weather_html = (
+            f'<div class="weather-bar">'
+            f'<span class="wx-emoji">{wx["emoji"]}</span>'
+            f'<div class="wx-detail"><b>Right now</b> '
+            f'{wx["temp_c"]:.0f}°C · {e(wx["desc"])}{wind_note}</div>'
+            f'</div>'
+        )
+
     cells = "".join(f'<div class="cell">{e(n)}<i></i></div>' for n in copy["notice"][:9])
     stats = (
         f'<div class="stat"><b>Out for</b><span>{mins} min</span></div>'
@@ -726,7 +786,7 @@ def render_card(facts: Dict[str, Any], places: List[Dict[str, Any]], copy: Dict[
         f'<div class="card">'
         f'<div class="kicker">Field card · {e(facts["date"])} · {e(act)} · {e(facts["season"])}</div>'
         f'<h1>{e(copy["title"])}</h1><div class="stats">{stats}</div>{warn}'
-        f'<p class="mission">{e(copy["mission"])}</p>{group_html}{mid}{species_html}'
+        f'<p class="mission">{e(copy["mission"])}</p>{group_html}{mid}{weather_html}{species_html}'
         f'<h2>Notice nine things</h2><div class="bingo">{cells}</div>'
         f'<div class="foot"><div><b>{e(copy["send_off"])}</b><br>Back by {e(fmt_t(end))}. '
         f'Tell someone where you are going.</div></div>'
@@ -802,8 +862,17 @@ def build(args: Any) -> str:
                   "(is `ollama serve` running?)", file=sys.stderr)
 
     web_ui = getattr(args, "web", False)
+
+    # Fetch current weather (Open-Meteo, free, no key) — graceful offline fallback
+    weather = None
+    if not getattr(args, "no_net", False):
+        try:
+            weather = fetch_weather(args.lat, args.lon)
+        except Exception:
+            weather = None
+
     rendered = render_card(facts, places, copy, sun, start, end, species=species,
-                           garden_info=garden_info, web_ui=web_ui)
+                           garden_info=garden_info, web_ui=web_ui, weather=weather)
 
     # Save to offline cache
     try:
@@ -862,240 +931,268 @@ FORM_HTML = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fieldcard · Print a Card, Step Outside</title>
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@700;800&display=swap');
 * { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0f1410; --surface: rgba(26,36,28,0.85); --surface-2: rgba(38,52,40,0.7);
+  --border: rgba(63,125,58,0.25); --border-glow: rgba(63,125,58,0.5);
+  --text: #e8efe9; --text-dim: #8fa894;
+  --accent: #4ade80; --accent-2: #22c55e; --accent-warm: #f59e0b;
+  --radius: 16px;
+}
 body {
-  padding: 16px 12px;
-  background: #f4efe2;
-  color: #1d2b22;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  line-height: 1.45;
-  overflow-x: hidden;
+  min-height: 100vh; background: var(--bg);
+  background-image: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(63,125,58,0.15), transparent),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(34,197,94,0.08), transparent);
+  color: var(--text); font-family: 'Inter', -apple-system, sans-serif; line-height: 1.5; overflow-x: hidden;
 }
-.wrap {
-  width: 100%;
-  max-width: 480px;
-  margin: 0 auto;
-  background: #fcfaf3;
-  padding: 24px 18px;
-  border: 1.5px solid #d5cdb8;
-  border-radius: 6px;
+.particles { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+.particle {
+  position: absolute; width: 3px; height: 3px; background: var(--accent);
+  border-radius: 50%; opacity: 0.15; animation: float-up linear infinite;
 }
-h1 {
-  font-family: Georgia, serif;
-  font-size: 26pt;
-  margin: 0 0 6px;
-  letter-spacing: -0.02em;
+@keyframes float-up {
+  0% { transform: translateY(100vh) scale(0); opacity: 0; }
+  10% { opacity: 0.15; } 90% { opacity: 0.15; }
+  100% { transform: translateY(-10vh) scale(1); opacity: 0; }
 }
-p.intro {
-  font-size: 11pt;
-  color: #55665b;
-  margin: 0 0 20px;
+.container { position: relative; z-index: 1; max-width: 520px; margin: 0 auto; padding: 24px 16px 40px; }
+.header { text-align: center; margin-bottom: 28px; animation: fadeInDown 0.6s ease; }
+@keyframes fadeInDown { from { opacity:0; transform:translateY(-20px); } to { opacity:1; transform:translateY(0); } }
+.logo {
+  font-family: 'Playfair Display', Georgia, serif; font-size: 42px; font-weight: 800; letter-spacing: -0.03em;
+  background: linear-gradient(135deg, var(--accent), #86efac);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 }
+.tagline { font-size: 14px; color: var(--text-dim); margin-top: 4px; }
+.streak-bar { display: flex; gap: 12px; margin-bottom: 20px; animation: fadeInUp 0.7s ease 0.1s both; }
+@keyframes fadeInUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+.streak-card, .badges-card {
+  background: var(--surface); backdrop-filter: blur(12px); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px; transition: border-color 0.3s, transform 0.2s;
+}
+.streak-card:hover, .badges-card:hover { border-color: var(--border-glow); transform: translateY(-2px); }
+.streak-card { flex: 1; text-align: center; }
+.badges-card { flex: 1.2; }
+.streak-number {
+  font-size: 36px; font-weight: 800; font-family: 'Playfair Display', Georgia, serif;
+  background: linear-gradient(135deg, var(--accent-warm), #fbbf24);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; line-height: 1;
+}
+.streak-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600; margin-top: 4px; }
+.streak-fire { font-size: 20px; display: block; margin-bottom: 2px; }
+.badges-title { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600; margin-bottom: 8px; }
+.badges-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; transition: all 0.3s; }
+.badge.earned { background: rgba(74,222,128,0.15); border: 1px solid rgba(74,222,128,0.3); color: var(--accent); }
+.badge.locked { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); color: var(--text-dim); opacity: 0.5; }
+.badge .badge-icon { font-size: 14px; }
+.status-row { display: flex; gap: 8px; margin-bottom: 20px; animation: fadeInUp 0.7s ease 0.2s both; }
 .status-pill {
-  display: flex;
-  gap: 12px;
-  background: #e9e3d0;
-  padding: 8px 12px;
-  border-radius: 4px;
-  font-size: 9pt;
-  margin-bottom: 22px;
+  flex: 1; display: flex; align-items: center; gap: 8px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; font-size: 12px;
+  transition: border-color 0.3s;
 }
-.status-item b { text-transform: uppercase; font-size: 7pt; letter-spacing: .08em; display: block; color: #5a6b5e; }
-.form-group {
-  margin-bottom: 18px;
+.status-pill:hover { border-color: var(--border-glow); }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.status-dot.online { background: var(--accent); box-shadow: 0 0 6px var(--accent); animation: pulse-dot 2s infinite; }
+.status-dot.offline { background: #ef4444; }
+@keyframes pulse-dot { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+.status-label { font-weight: 600; text-transform: uppercase; font-size: 9px; letter-spacing: 0.08em; color: var(--text-dim); display: block; }
+.status-value { font-weight: 500; color: var(--text); }
+.weather-pill {
+  display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 10px 14px; margin-bottom: 20px; animation: fadeInUp 0.7s ease 0.25s both;
+  transition: border-color 0.3s;
 }
-label {
-  display: block;
-  font-weight: 700;
-  font-size: 9.5pt;
-  margin-bottom: 6px;
-  letter-spacing: .02em;
+.weather-pill:hover { border-color: var(--border-glow); }
+.wx-icon { font-size: 28px; flex: none; }
+.wx-info { flex: 1; }
+.wx-temp { font-size: 18px; font-weight: 700; }
+.wx-desc { font-size: 12px; color: var(--text-dim); }
+.form-card {
+  background: var(--surface); backdrop-filter: blur(12px); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 24px 20px; animation: fadeInUp 0.7s ease 0.3s both;
 }
-.geo-inputs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-bottom: 8px;
+.form-group { margin-bottom: 20px; }
+.form-label { display: block; font-weight: 700; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; }
+.geo-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+input[type="number"], input[type="text"], select {
+  width: 100%; background: rgba(15,20,16,0.6); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 14px; color: var(--text); font-size: 14px; font-family: inherit;
+  transition: border-color 0.3s, box-shadow 0.3s; outline: none;
 }
+input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(74,222,128,0.1); }
 .btn-geo {
-  display: block;
-  width: 100%;
-  background: #3f7d3a;
-  color: #fff;
-  border: none;
-  border-radius: 4px;
-  padding: 9px 14px;
-  font-weight: 600;
-  cursor: pointer;
-  font-size: 9.5pt;
-  text-align: center;
-  margin-bottom: 8px;
+  display: block; width: 100%;
+  background: linear-gradient(135deg, rgba(74,222,128,0.15), rgba(34,197,94,0.1));
+  border: 1px solid rgba(74,222,128,0.3); color: var(--accent); border-radius: 10px;
+  padding: 10px 14px; font-weight: 600; font-size: 13px; cursor: pointer;
+  transition: all 0.3s; font-family: inherit; margin-bottom: 10px;
 }
-.btn-geo:hover { background: #32642e; }
-.presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 6px;
-}
+.btn-geo:hover { background: linear-gradient(135deg, rgba(74,222,128,0.25), rgba(34,197,94,0.2)); transform: translateY(-1px); }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; }
 .preset-btn {
-  background: #e8e2d2;
-  border: 1px solid #1d2b22;
-  padding: 4px 8px;
-  border-radius: 3px;
-  font-size: 8.5pt;
-  cursor: pointer;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim);
+  padding: 5px 12px; border-radius: 20px; font-size: 11px; font-weight: 500;
+  cursor: pointer; transition: all 0.3s; font-family: inherit;
 }
-.preset-btn:hover { background: #ded6c2; }
-.slider-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
+.preset-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(74,222,128,0.08); }
+.slider-row { display: flex; align-items: center; gap: 14px; }
 input[type="range"] {
-  flex: 1;
+  -webkit-appearance: none; flex: 1; height: 6px; background: rgba(255,255,255,0.08);
+  border-radius: 3px; outline: none;
 }
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 22px; height: 22px; background: var(--accent);
+  border-radius: 50%; cursor: pointer; box-shadow: 0 0 10px rgba(74,222,128,0.3); transition: transform 0.2s;
+}
+input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 .mins-badge {
-  font-family: Georgia, serif;
-  font-size: 14pt;
-  font-weight: bold;
-  width: 70px;
-  text-align: right;
+  font-family: 'Playfair Display', Georgia, serif; font-size: 22px; font-weight: 700;
+  color: var(--accent); width: 80px; text-align: right;
 }
-.activity-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
+.activity-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .activity-card {
-  border: 1.5px solid #1d2b22;
-  padding: 10px;
-  border-radius: 4px;
-  text-align: center;
-  cursor: pointer;
-  background: #fff;
-  font-weight: 600;
+  position: relative; border: 1.5px solid var(--border); padding: 14px 12px; border-radius: 12px;
+  text-align: center; cursor: pointer; background: rgba(15,20,16,0.4); transition: all 0.3s; overflow: hidden;
 }
-.activity-card input { margin-right: 6px; }
+.activity-card:hover { border-color: var(--border-glow); transform: translateY(-2px); }
+.activity-card input { display: none; }
+.activity-card:has(input:checked) { border-color: var(--accent); background: rgba(74,222,128,0.08); box-shadow: 0 0 20px rgba(74,222,128,0.1); }
+.activity-card input:checked + .act-content { color: var(--accent); }
+.act-icon { font-size: 24px; display: block; margin-bottom: 4px; }
+.act-name { font-weight: 700; font-size: 14px; }
 .btn-submit {
-  width: 100%;
-  background: #1d2b22;
-  color: #f8f4e8;
-  border: none;
-  padding: 14px;
-  font-size: 13pt;
-  font-weight: bold;
-  border-radius: 4px;
-  cursor: pointer;
-  margin-top: 10px;
-  font-family: Georgia, serif;
+  width: 100%; background: linear-gradient(135deg, var(--accent-2), var(--accent)); color: #0f1410; border: none;
+  padding: 16px; font-size: 16px; font-weight: 800; border-radius: 12px; cursor: pointer;
+  margin-top: 6px; font-family: 'Inter', sans-serif; letter-spacing: 0.02em; transition: all 0.3s;
+  position: relative; overflow: hidden;
 }
-.btn-submit:hover { background: #c4551d; }
-.note { font-size: 8pt; color: #55665b; margin-top: 4px; }
-
-@media (max-width: 480px) {
-  body { padding: 12px 8px; }
-  .wrap { padding: 20px 16px; }
-  .geo-row { flex-direction: column; }
-  .btn-geo { padding: 10px; width: 100%; text-align: center; }
-  .slider-row { flex-wrap: wrap; }
-  .mins-badge { width: 100%; text-align: center; margin-top: 4px; }
+.btn-submit:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(74,222,128,0.3); }
+.btn-submit:active { transform: translateY(0); }
+.btn-submit::after {
+  content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
+  background: linear-gradient(transparent, rgba(255,255,255,0.1), transparent);
+  transform: rotate(45deg); animation: shimmer 3s infinite;
 }
-
-@media (prefers-color-scheme: dark) {
-  body { background: #141a16; color: #ede7da; }
-  .wrap { background: #1e2621; border-color: #35423a; }
-  p.intro { color: #9fb0a5; }
-  .status-pill { background: #28332c; color: #cdd9d1; }
-  .status-item b { color: #879b8e; }
-  input[type="text"], input[type="number"], select, .activity-card {
-    background: #171e19; color: #ede7da; border-color: #435449;
-  }
-  .preset-btn { background: #28332c; border-color: #435449; color: #ede7da; }
-  .btn-submit { background: #c4551d; color: #fff; }
-  .btn-submit:hover { background: #d96224; }
-  .note { color: #879b8e; }
+@keyframes shimmer { 0% { transform: translateX(-100%) rotate(45deg); } 100% { transform: translateX(100%) rotate(45deg); } }
+.note { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+.history-section { margin-top: 24px; animation: fadeInUp 0.7s ease 0.4s both; }
+.history-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); margin-bottom: 10px; }
+.history-list { display: flex; flex-direction: column; gap: 6px; }
+.history-item {
+  display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 14px; font-size: 12px; transition: border-color 0.3s;
 }
+.history-item:hover { border-color: var(--border-glow); }
+.history-emoji { font-size: 18px; flex: none; }
+.history-info { flex: 1; }
+.history-date { color: var(--text-dim); font-size: 11px; }
+.history-act { font-weight: 600; color: var(--text); text-transform: capitalize; }
+.history-empty {
+  text-align: center; padding: 20px; color: var(--text-dim); font-size: 13px;
+  background: var(--surface); border: 1px dashed var(--border); border-radius: 10px;
+}
+@media (max-width: 480px) { .container { padding: 16px 12px 30px; } .streak-bar { flex-direction: column; } .header .logo { font-size: 34px; } }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>Fieldcard</h1>
-  <p class="intro">Tell us where and for how long. Leave with a page, not an app.</p>
-
-  <div class="status-pill">
-    <div class="status-item"><b>Ollama local model</b>{ollama_status}</div>
-    <div class="status-item"><b>Map terrain</b>{map_status}</div>
+<div class="particles" id="particles"></div>
+<div class="container">
+  <div class="header">
+    <div class="logo">Fieldcard</div>
+    <div class="tagline">Tell us where and for how long. Leave with a page, not an app.</div>
   </div>
-
-  <form method="POST" action="/card">
-    <div class="form-group">
-      <label>Location (Coordinates)</label>
-      <div class="geo-inputs">
-        <input type="number" step="any" id="lat" name="lat" placeholder="Latitude" value="40.7678" required>
-        <input type="number" step="any" id="lon" name="lon" placeholder="Longitude" value="-73.9718" required>
-      </div>
-      <button type="button" class="btn-geo" onclick="useLocation()">Use my location</button>
-      <div class="presets">
-        <button type="button" class="preset-btn" onclick="setPreset(40.7678, -73.9718)">NYC Central Park</button>
-        <button type="button" class="preset-btn" onclick="setPreset(51.5072, -0.1657)">London Hyde Park</button>
-        <button type="button" class="preset-btn" onclick="setPreset(-37.8304, 144.9796)">Melbourne Gardens</button>
-        <button type="button" class="preset-btn" onclick="setPreset(37.7694, -122.4862)">SF Golden Gate</button>
-      </div>
+  <div class="streak-bar">
+    <div class="streak-card">
+      <span class="streak-fire" id="streak-fire">🔥</span>
+      <div class="streak-number" id="streak-count">0</div>
+      <div class="streak-label">Day streak</div>
     </div>
-
-    <div class="form-group">
-      <label>Time available</label>
-      <div class="slider-row">
-        <input type="range" id="minutes" name="minutes" min="20" max="240" step="10" value="90" oninput="updateMins(this.value)">
-        <span class="mins-badge" id="mins-val">90 min</span>
+    <div class="badges-card">
+      <div class="badges-title">Achievements</div>
+      <div class="badges-row" id="badges-row"></div>
+    </div>
+  </div>
+  <div class="status-row">
+    <div class="status-pill">
+      <div class="status-dot {ollama_dot}"></div>
+      <div><span class="status-label">Ollama</span><span class="status-value">{ollama_short}</span></div>
+    </div>
+    <div class="status-pill">
+      <div class="status-dot online"></div>
+      <div><span class="status-label">Map Data</span><span class="status-value">{map_status}</span></div>
+    </div>
+  </div>
+  <div class="weather-pill" id="weather-pill" style="display:none">
+    <span class="wx-icon" id="wx-icon"></span>
+    <div class="wx-info"><span class="wx-temp" id="wx-temp"></span> <span class="wx-desc" id="wx-desc"></span></div>
+  </div>
+  <div class="form-card">
+    <form method="POST" action="/card">
+      <div class="form-group">
+        <label class="form-label">Location</label>
+        <div class="geo-inputs">
+          <input type="number" step="any" id="lat" name="lat" placeholder="Latitude" value="40.7678" required>
+          <input type="number" step="any" id="lon" name="lon" placeholder="Longitude" value="-73.9718" required>
+        </div>
+        <button type="button" class="btn-geo" onclick="useLocation()">Use my location</button>
+        <div class="presets">
+          <button type="button" class="preset-btn" onclick="setPreset(40.7678,-73.9718)">NYC Central Park</button>
+          <button type="button" class="preset-btn" onclick="setPreset(51.5072,-0.1657)">London Hyde Park</button>
+          <button type="button" class="preset-btn" onclick="setPreset(-37.8304,144.9796)">Melbourne</button>
+          <button type="button" class="preset-btn" onclick="setPreset(37.7694,-122.4862)">SF Golden Gate</button>
+        </div>
       </div>
-    </div>
-
-    <div class="form-group">
-      <label>Activity</label>
-      <div class="activity-grid">
-        <label class="activity-card"><input type="radio" name="activity" value="walk" checked> Walk</label>
-        <label class="activity-card"><input type="radio" name="activity" value="run"> Run</label>
-        <label class="activity-card"><input type="radio" name="activity" value="birding"> Birding</label>
-        <label class="activity-card"><input type="radio" name="activity" value="garden"> Garden</label>
+      <div class="form-group">
+        <label class="form-label">Time available</label>
+        <div class="slider-row">
+          <input type="range" id="minutes" name="minutes" min="20" max="240" step="10" value="90" oninput="updateMins(this.value)">
+          <span class="mins-badge" id="mins-val">90 min</span>
+        </div>
       </div>
+      <div class="form-group">
+        <label class="form-label">Activity</label>
+        <div class="activity-grid">
+          <label class="activity-card"><input type="radio" name="activity" value="walk" checked><div class="act-content"><span class="act-icon">🚶</span><span class="act-name">Walk</span></div></label>
+          <label class="activity-card"><input type="radio" name="activity" value="run"><div class="act-content"><span class="act-icon">🏃</span><span class="act-name">Run</span></div></label>
+          <label class="activity-card"><input type="radio" name="activity" value="birding"><div class="act-content"><span class="act-icon">🐦</span><span class="act-name">Birding</span></div></label>
+          <label class="activity-card"><input type="radio" name="activity" value="garden"><div class="act-content"><span class="act-icon">🌱</span><span class="act-name">Garden</span></div></label>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Local Open Model</label>
+        <input type="text" name="model" value="{default_model}">
+        <div class="note">No model running? Fieldcard uses built-in sensory prompts automatically.</div>
+      </div>
+      <button type="submit" class="btn-submit" onclick="recordCard()">Generate Field Card</button>
+    </form>
+  </div>
+  <div class="history-section">
+    <div class="history-title">Recent field cards</div>
+    <div class="history-list" id="history-list">
+      <div class="history-empty">No cards yet. Generate your first one above!</div>
     </div>
-
-    <div class="form-group">
-      <label>Local Open Model</label>
-      <input type="text" name="model" value="{default_model}">
-      <div class="note">No model running? Fieldcard automatically uses built-in sensory prompts.</div>
-    </div>
-
-    <button type="submit" class="btn-submit">Generate Field Card</button>
-  </form>
+  </div>
 </div>
-
 <script>
-function updateMins(val) {
-  document.getElementById('mins-val').textContent = val + ' min';
-}
-function setPreset(lat, lon) {
-  document.getElementById('lat').value = lat;
-  document.getElementById('lon').value = lon;
-}
-function useLocation() {
-  if (!navigator.geolocation) {
-    alert('Geolocation not supported by this browser.');
-    return;
-  }
-  navigator.geolocation.getCurrentPosition(
-    pos => {
-      document.getElementById('lat').value = pos.coords.latitude.toFixed(4);
-      document.getElementById('lon').value = pos.coords.longitude.toFixed(4);
-    },
-    err => {
-      alert('Could not retrieve location: ' + err.message);
-    },
-    { timeout: 7000 }
-  );
-}
+(function(){var c=document.getElementById('particles');for(var i=0;i<20;i++){var p=document.createElement('div');p.className='particle';p.style.left=Math.random()*100+'%';p.style.animationDuration=(8+Math.random()*12)+'s';p.style.animationDelay=Math.random()*8+'s';p.style.width=p.style.height=(2+Math.random()*3)+'px';c.appendChild(p);}})();
+function updateMins(v){document.getElementById('mins-val').textContent=v+' min';}
+function setPreset(la,lo){document.getElementById('lat').value=la;document.getElementById('lon').value=lo;fetchWeather(la,lo);}
+function useLocation(){if(!navigator.geolocation){alert('Geolocation not supported.');return;}navigator.geolocation.getCurrentPosition(function(p){var la=p.coords.latitude.toFixed(4),lo=p.coords.longitude.toFixed(4);document.getElementById('lat').value=la;document.getElementById('lon').value=lo;fetchWeather(la,lo);},function(e){alert('Location error: '+e.message);},{timeout:7000});}
+var WMO={0:'Clear',1:'Mostly clear',2:'Partly cloudy',3:'Overcast',45:'Fog',51:'Light drizzle',53:'Drizzle',61:'Light rain',63:'Rain',65:'Heavy rain',71:'Light snow',73:'Snow',80:'Showers',95:'Thunderstorm'};
+var WMO_E={0:'\\u2600\\uFE0F',1:'\\uD83C\\uDF24',2:'\\u26C5',3:'\\u2601\\uFE0F',45:'\\uD83C\\uDF2B',51:'\\uD83C\\uDF26',53:'\\uD83C\\uDF27',61:'\\uD83C\\uDF26',63:'\\uD83C\\uDF27',65:'\\uD83C\\uDF27',71:'\\uD83C\\uDF28',73:'\\u2744\\uFE0F',80:'\\uD83C\\uDF26',95:'\\u26C8'};
+function fetchWeather(lat,lon){fetch('https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon+'&current=temperature_2m,wind_speed_10m,weather_code&temperature_unit=celsius').then(function(r){return r.json()}).then(function(d){var c=d.current||{};var code=c.weather_code||0;document.getElementById('wx-icon').textContent=WMO_E[code]||'\\uD83C\\uDF21';document.getElementById('wx-temp').textContent=(c.temperature_2m||'--')+'\\u00B0C';document.getElementById('wx-desc').textContent=(WMO[code]||'')+(c.wind_speed_10m?' \\u00B7 Wind '+Math.round(c.wind_speed_10m)+' km/h':'');document.getElementById('weather-pill').style.display='flex';}).catch(function(){});}
+fetchWeather(40.7678,-73.9718);
+var BADGES=[{id:'first',name:'First Steps',icon:'\\uD83C\\uDF31',need:1},{id:'s3',name:'3-Day Streak',icon:'\\uD83D\\uDD25',need:3},{id:'s7',name:'Week Explorer',icon:'\\u2B50',need:7},{id:'s14',name:'Fortnight',icon:'\\uD83C\\uDFC6',need:14},{id:'s30',name:'Monthly Master',icon:'\\uD83D\\uDC51',need:30},{id:'birder',name:'Bird Watcher',icon:'\\uD83D\\uDC26',need:1,type:'birding'},{id:'runner',name:'Trail Runner',icon:'\\uD83C\\uDFC3',need:1,type:'run'},{id:'gardener',name:'Green Thumb',icon:'\\uD83C\\uDF3B',need:1,type:'garden'}];
+function getHistory(){try{return JSON.parse(localStorage.getItem('fc_history')||'[]');}catch(e){return[];}}
+function getStreak(){var h=getHistory();if(!h.length)return 0;var streak=1;var dates=h.map(function(x){return x.date}).filter(function(v,i,a){return a.indexOf(v)===i}).sort().reverse();var today=new Date().toISOString().slice(0,10);var yd=new Date();yd.setDate(yd.getDate()-1);var yds=yd.toISOString().slice(0,10);if(dates[0]!==today&&dates[0]!==yds)return 0;for(var i=1;i<dates.length;i++){var d1=new Date(dates[i-1]),d2=new Date(dates[i]);if((d1-d2)===86400000)streak++;else break;}return streak;}
+function recordCard(){var act=document.querySelector('input[name=activity]:checked');var e={date:new Date().toISOString().slice(0,10),time:new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),activity:act?act.value:'walk',lat:document.getElementById('lat').value,lon:document.getElementById('lon').value};var h=getHistory();h.unshift(e);if(h.length>50)h=h.slice(0,50);localStorage.setItem('fc_history',JSON.stringify(h));}
+function renderStreak(){var s=getStreak();document.getElementById('streak-count').textContent=s;var f=document.getElementById('streak-fire');f.textContent=s>=7?'\\uD83D\\uDD25\\uD83D\\uDD25\\uD83D\\uDD25':s>=3?'\\uD83D\\uDD25\\uD83D\\uDD25':s>=1?'\\uD83D\\uDD25':'\\uD83D\\uDCA4';}
+function renderBadges(){var h=getHistory(),s=getStreak(),acts={};h.forEach(function(x){acts[x.activity]=(acts[x.activity]||0)+1;});var total=h.length;var row=document.getElementById('badges-row');row.innerHTML='';BADGES.forEach(function(b){var earned=false;if(b.type)earned=(acts[b.type]||0)>=b.need;else if(b.id==='first')earned=total>=1;else earned=s>=b.need;var el=document.createElement('span');el.className='badge '+(earned?'earned':'locked');el.innerHTML='<span class="badge-icon">'+b.icon+'</span>'+b.name;el.title=earned?'Earned!':'Locked';row.appendChild(el);});}
+function renderHistory(){var h=getHistory().slice(0,5);var list=document.getElementById('history-list');if(!h.length)return;var AE={walk:'\\uD83D\\uDEB6',run:'\\uD83C\\uDFC3',birding:'\\uD83D\\uDC26',garden:'\\uD83C\\uDF31'};list.innerHTML='';h.forEach(function(x){var el=document.createElement('div');el.className='history-item';el.innerHTML='<span class="history-emoji">'+(AE[x.activity]||'\\uD83D\\uDCCB')+'</span><div class="history-info"><span class="history-act">'+x.activity+'</span><span class="history-date"> \\u00B7 '+x.date+' at '+x.time+'</span></div>';list.appendChild(el);});}
+renderStreak();renderBadges();renderHistory();
 </script>
 </body>
 </html>
@@ -1125,9 +1222,14 @@ class WebHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/" or self.path == "/index.html":
             ollama_st = check_ollama_status()
-            html_text = FORM_HTML.replace("{ollama_status}", ollama_st)\
-                                 .replace("{map_status}", "Online / Cached")\
-                                 .replace("{default_model}", self.default_model)
+            ollama_dot = "online" if "Online" in ollama_st else "offline"
+            ollama_short = ollama_st.split("(")[0].strip()
+            html_text = FORM_HTML\
+                .replace("{ollama_dot}", ollama_dot)\
+                .replace("{ollama_short}", ollama_short)\
+                .replace("{ollama_status}", ollama_st)\
+                .replace("{map_status}", "Online / Cached")\
+                .replace("{default_model}", self.default_model)
             body = html_text.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -1217,6 +1319,7 @@ def run_serve(argv: Optional[List[str]] = None) -> int:
     WebHandler.places_override = args.places
     WebHandler.default_model = args.model
 
+    HTTPServer.allow_reuse_address = True
     server = HTTPServer((args.host, args.port), WebHandler)
     print(f"\n[Fieldcard] Local web doorway running at http://{args.host}:{args.port}")
     print("Press Ctrl+C to stop.\n")
