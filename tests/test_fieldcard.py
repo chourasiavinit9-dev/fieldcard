@@ -136,6 +136,7 @@ class EndToEnd(unittest.TestCase):
             h = self.run_cli("--places", DEMO, "--start", "15:30")
         finally:
             srv.shutdown()
+            srv.server_close()
             del os.environ["OLLAMA_HOST"]
         self.assertIn("Autumn Light Hunt", h)
         self.assertIn("&lt;b&gt;The Pond&lt;/b&gt;", h)  # model output is escaped
@@ -150,5 +151,137 @@ class EndToEnd(unittest.TestCase):
         self.assertIn("built-in prompts", h)
 
 
+class WebServerTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        fc.WebHandler.places_override = DEMO
+        cls.server = HTTPServer(("127.0.0.1", 0), fc.WebHandler)
+        cls.port = cls.server.server_port
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def test_get_form_200(self):
+        import urllib.request
+        url = f"http://127.0.0.1:{self.port}/"
+        with urllib.request.urlopen(url, timeout=3) as r:
+            self.assertEqual(r.status, 200)
+            body = r.read().decode("utf-8")
+            self.assertIn("Fieldcard", body)
+            self.assertIn('name="lat"', body)
+            self.assertIn('name="minutes"', body)
+            self.assertIn("Use my location", body)
+            self.assertIn("NYC Central Park", body)
+            self.assertIn("Ollama local model", body)
+
+    def test_post_valid_card_200(self):
+        import urllib.request
+        import urllib.parse
+        url = f"http://127.0.0.1:{self.port}/card"
+        data = urllib.parse.urlencode({
+            "lat": "40.7678",
+            "lon": "-73.9718",
+            "minutes": "90",
+            "activity": "walk",
+            "model": "llama3.2:3b"
+        }).encode("utf-8")
+        req = urllib.request.Request(url, data=data)
+        with urllib.request.urlopen(req, timeout=5) as r:
+            self.assertEqual(r.status, 200)
+            body = r.read().decode("utf-8")
+            self.assertIn("The Pond", body)
+            self.assertIn("Print Field Card (A5)", body)
+            self.assertIn("Make another card", body)
+
+    def test_post_invalid_latitude_400(self):
+        import urllib.request
+        import urllib.parse
+        url = f"http://127.0.0.1:{self.port}/card"
+        data = urllib.parse.urlencode({"lat": "999", "lon": "0", "minutes": "90", "activity": "walk"}).encode("utf-8")
+        req = urllib.request.Request(url, data=data)
+        try:
+            with urllib.request.urlopen(req, timeout=3) as r:
+                self.fail("Expected 400 Bad Request")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 400)
+            body = e.read().decode("utf-8")
+            self.assertIn("Invalid Request", body)
+            self.assertNotIn("Traceback", body)
+
+    def test_post_invalid_activity_400(self):
+        import urllib.request
+        import urllib.parse
+        url = f"http://127.0.0.1:{self.port}/card"
+        data = urllib.parse.urlencode({"lat": "40.7", "lon": "-73.9", "minutes": "90", "activity": "skydiving"}).encode("utf-8")
+        req = urllib.request.Request(url, data=data)
+        try:
+            with urllib.request.urlopen(req, timeout=3) as r:
+                self.fail("Expected 400 Bad Request")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 400)
+
+    def test_post_oversized_payload_413(self):
+        import urllib.request
+        url = f"http://127.0.0.1:{self.port}/card"
+        data = b"x" * 70000
+        req = urllib.request.Request(url, data=data)
+        try:
+            with urllib.request.urlopen(req, timeout=3) as r:
+                self.fail("Expected 413 Payload Too Large")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 413)
+
+
+class FeaturesTests(unittest.TestCase):
+    def test_qr_code_svg(self):
+        import qr_code
+        svg = qr_code.qr_svg("https://fieldcard.local/test", size_px=120)
+        self.assertIn("<svg", svg)
+        self.assertIn('viewBox="0 0', svg)
+        self.assertIn("<rect", svg)
+
+    def test_garden_advice_calculation(self):
+        advice = fc.garden_advice("2026-10-15", today=dt.date(2026, 10, 10))
+        self.assertGreater(len(advice), 0)
+        crops = [a["crop"] for a in advice]
+        self.assertTrue(any("Garlic" in c or "Kale" in c or "Spinach" in c for c in crops))
+
+    def test_run_club_group_mode(self):
+        out = os.path.join(tempfile.mkdtemp(), "card.html")
+        fc.main(["--lat", str(NYC[0]), "--lon", str(NYC[1]), "--group", "--no-llm",
+                 "--places", DEMO, "--out", out])
+        with open(out, encoding="utf-8") as f:
+            h = f.read()
+        self.assertIn("Pace options", h)
+        self.assertIn("Conversational", h)
+
+    def test_post_walk_journal_log(self):
+        tmp_log = os.path.join(tempfile.mkdtemp(), "test_notes.md")
+        code = fc.run_log(["--found", "Oak leaf, spider web, moss", "--notes", "Cold breeze from south", "--file", tmp_log])
+        self.assertEqual(code, 0)
+        self.assertTrue(os.path.exists(tmp_log))
+        with open(tmp_log, encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("Oak leaf, spider web, moss", content)
+        self.assertIn("Cold breeze from south", content)
+
+    def test_banned_words_filtered(self):
+        fallback = {"title": "Safe Title", "mission": "Safe mission", "notice": ["Safe 1"] * 9, "send_off": "Safe bye"}
+        bad_json = json.dumps({
+            "title": "Embrace the glorious tapestry",
+            "mission": "Immerse yourself and unplug from screens in nature's beauty",
+            "notice": ["Item one", "Item two"],
+            "send_off": "Go forth"
+        })
+        parsed = fc.parse_llm_json(bad_json, fallback)
+        self.assertEqual(parsed["title"], "Safe Title")
+        self.assertEqual(parsed["mission"], "Safe mission")
+
+
 if __name__ == "__main__":
     unittest.main()
+

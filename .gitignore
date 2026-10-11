@@ -13,6 +13,7 @@ fieldcard.html
 fieldcard.pdf
 fieldcard.png
 test_output/
+test_renders/
 
 # macOS
 .DS_Store
