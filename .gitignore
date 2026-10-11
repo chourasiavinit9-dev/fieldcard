@@ -17,3 +17,6 @@ test_renders/
 
 # macOS
 .DS_Store
+
+# Local planning / internal docs — not for public repo
+IMPLEMENTATION.md
