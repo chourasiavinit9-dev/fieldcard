@@ -1,0 +1,9 @@
+[
+  {"name": "The Pond", "kind": "water", "lat": 40.7664, "lon": -73.9740},
+  {"name": "Wollman Rink Lawn", "kind": "park", "lat": 40.7685, "lon": -73.9748},
+  {"name": "Bethesda Terrace", "kind": "viewpoint", "lat": 40.7740, "lon": -73.9713},
+  {"name": "The Ramble", "kind": "woods", "lat": 40.7774, "lon": -73.9707},
+  {"name": "Belvedere Castle", "kind": "viewpoint", "lat": 40.7794, "lon": -73.9692},
+  {"name": "Sheep Meadow", "kind": "park", "lat": 40.7714, "lon": -73.9760},
+  {"name": "Conservatory Garden", "kind": "garden", "lat": 40.7939, "lon": -73.9522}
+]
